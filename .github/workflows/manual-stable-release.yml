@@ -30,7 +30,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          build-scan-terms-of-use-url: "https://gradle.com/help/legal-terms-of-use"
+          build-scan-terms-of-use-url: "https://gradle.com"
           build-scan-terms-of-use-agree: "yes"
           build-scan-publish: false
           cache-read-only: true
@@ -74,4 +74,41 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      # The remaining compilation, renaming, and release steps follow below unchanged
+      # Compile explicitly to generate APK files
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      # Locate, verify, and rename the output package using the version tag input variable
+      - name: Rename Release APK
+        run: |
+          cd app/build/outputs/apk/release/
+          APK_FILE=$(ls *.apk | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "Error: Output APK file was not found during execution."
+            exit 1
+          fi
+          echo "Found compiled package: $APK_FILE"
+          mv "$APK_FILE" "app-release-v${{ github.event.inputs.version_tag }}.apk"
+          echo "Package successfully updated to app-release-v${{ github.event.inputs.version_tag }}.apk"
+
+      # Upload the cleanly formatted package directly to the GitHub Actions workflow run summary
+      - name: Upload Build APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-release-apk-v${{ github.event.inputs.version_tag }}
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      # Automatically establish a new repository release draft containing the final custom binary
+      - name: Generate Github Release Draft
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ github.event.inputs.version_tag }}"
+          name: "Stable Release v${{ github.event.inputs.version_tag }}"
+          body: "Automated manual production release package for version ${{ github.event.inputs.version_tag }}."
+          draft: true
+          prerelease: false
+          files: app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
